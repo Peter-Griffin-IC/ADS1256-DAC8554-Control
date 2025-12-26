@@ -1,0 +1,318 @@
+/* USER CODE BEGIN Header */
+/**
+  ******************************************************************************
+  * @file           : main.c
+  * @brief          : Main program body
+  ******************************************************************************
+  * @attention
+  *
+  * Copyright (c) 2025 STMicroelectronics.
+  * All rights reserved.
+  *
+  * This software is licensed under terms that can be found in the LICENSE file
+  * in the root directory of this software component.
+  * If no LICENSE file comes with this software, it is provided AS-IS.
+  *
+  ******************************************************************************
+  */
+/* USER CODE END Header */
+/* Includes ------------------------------------------------------------------*/
+#include "main.h"
+#include "spi.h"
+#include "tim.h"
+#include "usart.h"
+#include "gpio.h"
+
+/* Private includes ----------------------------------------------------------*/
+/* USER CODE BEGIN Includes */
+#include "stdio.h"
+#include "ads1256.h"
+#include "string.h"
+/* USER CODE END Includes */
+
+/* Private typedef -----------------------------------------------------------*/
+/* USER CODE BEGIN PTD */
+
+/* USER CODE END PTD */
+
+/* Private define ------------------------------------------------------------*/
+/* USER CODE BEGIN PD */
+//     ض   
+int fputc(int ch, FILE *f)
+{
+  while(HAL_UART_Transmit(&huart3, (uint8_t *)&ch, 1, 0xffff)!=HAL_OK);
+  return ch;
+}
+
+int fgetc(FILE *f)
+{
+	volatile char c=0;
+  while(HAL_UART_Receive(&huart3, (uint8_t *)&c, 1, 0xffff)!=HAL_OK);
+  return c;
+}
+
+/* __ADS1256_DRDY__*/
+uint8_t Flag_DRDY;
+
+
+/* USER CODE END PD */
+
+/* Private macro -------------------------------------------------------------*/
+/* USER CODE BEGIN PM */
+
+/* USER CODE END PM */
+
+/* Private variables ---------------------------------------------------------*/
+
+/* USER CODE BEGIN PV */
+
+/* USER CODE END PV */
+
+/* Private function prototypes -----------------------------------------------*/
+void SystemClock_Config(void);
+/* USER CODE BEGIN PFP */
+
+/* USER CODE END PFP */
+
+/* Private user code ---------------------------------------------------------*/
+/* USER CODE BEGIN 0 */
+
+/* USER CODE END 0 */
+
+/**
+  * @brief  The application entry point.
+  * @retval int
+  */
+int main(void)
+{
+
+  /* USER CODE BEGIN 1 */
+	int32_t adc[8];
+	int32_t volt[8];
+	uint8_t i;
+	uint8_t ch_num;
+	char infoBackPC[64];
+	int32_t iTemp;
+  /* USER CODE END 1 */
+
+  /* MCU Configuration--------------------------------------------------------*/
+
+  /* Reset of all peripherals, Initializes the Flash interface and the Systick. */
+  HAL_Init();
+
+  /* USER CODE BEGIN Init */
+
+  /* USER CODE END Init */
+
+  /* Configure the system clock */
+  SystemClock_Config();
+
+  /* USER CODE BEGIN SysInit */
+
+  /* USER CODE END SysInit */
+
+  /* Initialize all configured peripherals */
+  MX_GPIO_Init();
+  MX_SPI3_Init();
+  MX_USART3_UART_Init();
+  MX_TIM3_Init();
+  /* USER CODE BEGIN 2 */
+	/* ֹͣADS1256 DRDY  */
+	ADS1256_StopScan();
+	
+	//stable delay
+	HAL_Delay(100);
+	
+	//TIM3 enable
+//	HAL_TIM_Base_Start_IT(&htim3);
+			//ADS1256 INIT
+	/* ADS1256  PGA=1, DRATE=30KSPS, BUFEN=0, 5V */
+	bsp_InitADS1256();
+	//print id
+	{
+		uint8_t id;
+
+		id = ADS1256_ReadChipID();
+
+		printf("\r\n");
+		printf("Get ADS1256 ID... ...\r\n");
+		if (id != 3)
+		{
+			sprintf(infoBackPC, "Error, ASD1256 Chip ID = 0x%X", id);
+		}
+		else
+		{
+			sprintf(infoBackPC, "Ok, ASD1256 Chip ID = 0x%X", id);
+		}
+		printf("%s,%d\r\n",(uint8_t*)infoBackPC, strlen(infoBackPC));
+	}
+/* 设置PGA增益，数据更新速率 */
+#if 0
+	printf("\r\nPGA = 1, RATE = 15sps, SINGLE\r\n\r\n");
+
+	ADS1256_CfgADC(ADS1256_GAIN_1, ADS1256_15SPS);	/* 配置ADC参数： 增益1:1, 数据输出速率 15Hz */
+
+	/*
+	   中断服务程序会自动读取ADC结果保存在全局变量，主程序通过 ADS1256_GetAdc() 函数来读取这些数据
+	*/
+	ADS1256_StartScan(0);	/* 启动中断扫描模式. 0表示单端8路，1表示差分4路 */
+	ch_num = 8;		/* 通道数 = 8 或者4 */
+#else
+	printf("\r\nPGA = 1, Rate = 30ksps, for 4 roads\r\n\r\n");
+
+	ADS1256_CfgADC(ADS1256_GAIN_1, ADS1256_30000SPS);	/* 配置ADC参数： 增益1:1, 数据输出速率 15Hz */
+
+	/*
+	   中断服务程序会自动读取ADC结果保存在全局变量，主程序通过 ADS1256_GetAdc() 函数来读取这些数据
+	*/
+	ADS1256_StartScan(1);	/* 启动中断扫描模式. 0表示单端8路，1表示差分4路 */
+	ch_num = 4;		/* 通道数 = 8 或者4 */
+#endif
+	
+	sprintf(infoBackPC, "[%dCH_NUM]", ch_num);
+	printf("%s,%d\r\n",(uint8_t*)infoBackPC, strlen(infoBackPC));
+	
+	Flag_DRDY = 0;
+  /* USER CODE END 2 */
+
+  /* Infinite loop */
+  /* USER CODE BEGIN WHILE */
+  while (1)
+  {
+    /* USER CODE END WHILE */
+
+    /* USER CODE BEGIN 3 */
+for (i = 0; i < ch_num; i++)
+{
+	/* 从全局缓冲区读取采样结果。 采样结果是在中断服务程序中读取的。 */
+	adc[i] = ADS1256_GetAdc(i);
+
+	/* 4194303 = 2.5V , 这是理论值，实际可以根据2.5v基准的实际值进行公式矫正 */
+	volt[i] = ((int64_t)adc[i] * 2493000) / 4194303;	/* 计算实际电压值(近似估算的)，如需准确，请进行校准 */
+//	volt[i] = ((int64_t)adc[i] * 598/1000);	/* 计算实际电压值(近似估算的)，如需准确，请进行校准 */
+}
+
+/* 打印采集数据 */
+if(Flag_DRDY >= ch_num)
+{
+	Flag_DRDY = 0;
+	for (i = 0; i < ch_num; i++)
+	{
+		iTemp = volt[i];	/* 余数，uV  */
+		if (iTemp < 0)
+		{
+			iTemp = -iTemp;
+			sprintf(infoBackPC, "%d=%6d,(-%d.%03d %03d V)", i, adc[i], iTemp /1000000, (iTemp%1000000)/1000, iTemp%1000);
+		}
+		else
+		{
+			sprintf(infoBackPC,"%d=%6d,( %d.%03d %03d V)", i, adc[i], iTemp/1000000, (iTemp%1000000)/1000, iTemp%1000);
+		}
+//		printf("%s,%d\r\n",(uint8_t*)infoBackPC, strlen(infoBackPC));
+		printf("%s\t",(uint8_t*)infoBackPC);
+	}
+	printf("\r\n");
+	HAL_Delay(300);
+}
+}
+  /* USER CODE END 3 */
+}
+
+/**
+  * @brief System Clock Configuration
+  * @retval None
+  */
+void SystemClock_Config(void)
+{
+  RCC_OscInitTypeDef RCC_OscInitStruct = {0};
+  RCC_ClkInitTypeDef RCC_ClkInitStruct = {0};
+
+  /** Configure the main internal regulator output voltage
+  */
+  HAL_PWREx_ControlVoltageScaling(PWR_REGULATOR_VOLTAGE_SCALE1_BOOST);
+
+  /** Initializes the RCC Oscillators according to the specified parameters
+  * in the RCC_OscInitTypeDef structure.
+  */
+  RCC_OscInitStruct.OscillatorType = RCC_OSCILLATORTYPE_HSI;
+  RCC_OscInitStruct.HSIState = RCC_HSI_ON;
+  RCC_OscInitStruct.HSICalibrationValue = RCC_HSICALIBRATION_DEFAULT;
+  RCC_OscInitStruct.PLL.PLLState = RCC_PLL_ON;
+  RCC_OscInitStruct.PLL.PLLSource = RCC_PLLSOURCE_HSI;
+  RCC_OscInitStruct.PLL.PLLM = RCC_PLLM_DIV1;
+  RCC_OscInitStruct.PLL.PLLN = 21;
+  RCC_OscInitStruct.PLL.PLLP = RCC_PLLP_DIV2;
+  RCC_OscInitStruct.PLL.PLLQ = RCC_PLLQ_DIV2;
+  RCC_OscInitStruct.PLL.PLLR = RCC_PLLR_DIV2;
+  if (HAL_RCC_OscConfig(&RCC_OscInitStruct) != HAL_OK)
+  {
+    Error_Handler();
+  }
+
+  /** Initializes the CPU, AHB and APB buses clocks
+  */
+  RCC_ClkInitStruct.ClockType = RCC_CLOCKTYPE_HCLK|RCC_CLOCKTYPE_SYSCLK
+                              |RCC_CLOCKTYPE_PCLK1|RCC_CLOCKTYPE_PCLK2;
+  RCC_ClkInitStruct.SYSCLKSource = RCC_SYSCLKSOURCE_PLLCLK;
+  RCC_ClkInitStruct.AHBCLKDivider = RCC_SYSCLK_DIV1;
+  RCC_ClkInitStruct.APB1CLKDivider = RCC_HCLK_DIV4;
+  RCC_ClkInitStruct.APB2CLKDivider = RCC_HCLK_DIV1;
+
+  if (HAL_RCC_ClockConfig(&RCC_ClkInitStruct, FLASH_LATENCY_4) != HAL_OK)
+  {
+    Error_Handler();
+  }
+}
+
+/* USER CODE BEGIN 4 */
+/**
+  * @brief  EXTI line detection callbacks.
+  * @param  GPIO_Pin: Specifies the pins connected EXTI line
+  * @retval None
+  */
+void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
+{
+  /* Prevent unused argument(s) compilation warning */
+//  UNUSED(GPIO_Pin);
+  /* NOTE: This function Should not be modified, when the callback is needed,
+           the HAL_GPIO_EXTI_Callback could be implemented in the user file
+   */
+	
+	if(GPIO_Pin == ADS_DRDY_Pin)
+	{
+		ADS1256_ISR();
+		Flag_DRDY ++;
+	}
+}
+/* USER CODE END 4 */
+
+/**
+  * @brief  This function is executed in case of error occurrence.
+  * @retval None
+  */
+void Error_Handler(void)
+{
+  /* USER CODE BEGIN Error_Handler_Debug */
+  /* User can add his own implementation to report the HAL error return state */
+  __disable_irq();
+  while (1)
+  {
+  }
+  /* USER CODE END Error_Handler_Debug */
+}
+#ifdef USE_FULL_ASSERT
+/**
+  * @brief  Reports the name of the source file and the source line number
+  *         where the assert_param error has occurred.
+  * @param  file: pointer to the source file name
+  * @param  line: assert_param error line source number
+  * @retval None
+  */
+void assert_failed(uint8_t *file, uint32_t line)
+{
+  /* USER CODE BEGIN 6 */
+  /* User can add his own implementation to report the file name and line number,
+     ex: printf("Wrong parameters value: file %s on line %d\r\n", file, line) */
+  /* USER CODE END 6 */
+}
+#endif /* USE_FULL_ASSERT */
